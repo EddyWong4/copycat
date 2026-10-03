@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Copycat</title>
+  <meta name="description" content="Copycat: ventas, inventario, fiado y cierre del día del negocio de impresiones y copias. Funciona sin internet.">
+  <meta name="theme-color" content="#3b055d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="barra">
+    <div class="marca">
+      <img class="logo" src="icons/gato.png" alt="" width="42" height="42">
+      <div>
+        <h1 id="nombre-negocio">Copycat</h1>
+        <div class="sub" id="fecha-hoy"></div>
+      </div>
+    </div>
+    <div class="barra-der">
+      <span id="estado-red" class="pastilla" title="Conexión"></span>
+      <button class="icono" data-action="ir" data-vista="ayuda" aria-label="Ayuda">❓</button>
+      <button class="icono" data-action="ir" data-vista="ajustes" aria-label="Ajustes">⚙️</button>
+    </div>
+  </header>
+
+  <div id="aviso-cierre" class="aviso-cierre" hidden></div>
+
+  <main id="vista" tabindex="-1"></main>
+
+  <nav class="nav" aria-label="Secciones">
+    <button data-action="ir" data-vista="vender"><span>🛒</span>Vender</button>
+    <button data-action="ir" data-vista="inventario"><span>📦</span>Inventario</button>
+    <button data-action="ir" data-vista="fiado"><span>📒</span>Fiado</button>
+    <button data-action="ir" data-vista="dinero"><span>💼</span>Dinero</button>
+    <button data-action="ir" data-vista="calculadora"><span>🧮</span>Precios</button>
+    <button data-action="ir" data-vista="hoy"><span>📊</span>Mi día</button>
+  </nav>
+
+  <div id="modal" class="modal" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="version.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
