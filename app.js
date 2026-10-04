@@ -798,11 +798,13 @@ const calc = {
   compra: '', piezas: '1', extra: '', pct: 50,
   paquete: '120', hojas: '500', toner: '900', rinde: '3000', otros: '0.10', pctCopia: 150,
   precio: '', costo: '',
+  redondeo: 'auto', // auto: a 50 centavos (menos de $10) o a peso · peso: a peso cerrado · no: sin redondear
 };
-// Redondea hacia arriba a 50 centavos (precios chicos) o a peso cerrado
-function redondear(c) {
+const REDONDEOS = [['auto', 'A 50 centavos'], ['peso', 'A peso cerrado'], ['no', 'Sin redondear']];
+// Redondea siempre hacia arriba, para no perder ganancia
+function redondear(c, modo = calc.redondeo) {
   if (c <= 0) return 0;
-  const paso = c < 1000 ? 50 : 100;
+  const paso = modo === 'no' ? 1 : modo === 'peso' || c >= 1000 ? 100 : 50;
   return Math.ceil(c / paso - 1e-9) * paso;
 }
 const campoCalc = (k, etiqueta, ayuda = '', esDinero = true) => `<label class="campo">${etiqueta}${ayuda ? `<span class="ayuda">${ayuda}</span>` : ''}
@@ -870,18 +872,31 @@ function pintarCalc() {
   const exacto = costo * (1 + pct / 100);
   const precio = redondear(exacto);
   const gan = precio - costo;
+  const redondeado = precio - exacto >= 1;
+  const uno = calc.modo === 'copia' ? 'copia' : 'una';
+  // Productos a los que se les puede poner este precio (en "copia", primero los servicios)
+  const prods = [...S.productos].sort((a, b) => (a.tipo === b.tipo ? a.nombre.localeCompare(b.nombre)
+    : (a.tipo === 'servicio') === (calc.modo === 'copia') ? -1 : 1));
   res.innerHTML = `<div class="resultado"><div class="et">Véndelo a</div><div class="val num">${dinero(precio)}</div>
-      <div class="small muted">${calc.modo === 'copia' ? 'cada copia' : 'cada pieza'}</div></div>
-    <table class="tabla" style="margin-top:12px">
+      <div class="small muted">${calc.modo === 'copia' ? 'cada copia' : 'cada pieza'}</div>
+      ${redondeado ? `<div class="small" style="margin-top:6px">La cuenta exacta da <b>${dinero(exacto)}</b>; lo subí a <b>${dinero(precio)}</b> para que sea fácil dar cambio.</div>` : ''}</div>
+    <div class="campo" style="margin-top:12px">¿Cómo redondeo el precio?
+      <div class="chips" style="margin-top:6px">${REDONDEOS.map(([k, t]) => `<button class="chip ${calc.redondeo === k ? 'activo' : ''}" data-action="calc-redondeo" data-r="${k}">${t}</button>`).join('')}</div></div>
+    <table class="tabla">
       ${(filas || []).map(([t, v]) => `<tr><td>${t}</td><td>${dinero(v)}</td></tr>`).join('')}
-      <tr><td>Te cuesta cada ${calc.modo === 'copia' ? 'copia' : 'una'}</td><td>${dinero(costo)}</td></tr>
-      <tr><td>Precio exacto con ${pct}%</td><td>${dinero(exacto)}</td></tr>
-      <tr><td>Ganas en cada ${calc.modo === 'copia' ? 'copia' : 'una'}</td><td style="color:var(--verde)">${dinero(gan)}</td></tr>
+      <tr><td>Te cuesta cada ${uno}</td><td>${dinero(costo)}</td></tr>
+      <tr><td>La vendes a</td><td>${dinero(precio)}</td></tr>
+      <tr><td>Ganas en cada ${uno}</td><td style="color:var(--verde)">${dinero(gan)} (${Math.round(gan / costo * 100)}%)</td></tr>
       ${calc.modo === 'vender' && piezas > 1 ? `<tr><td>Si vendes las ${piezas}</td><td style="color:var(--verde)">ganas ${dinero(gan * piezas)}</td></tr>` : ''}
       ${calc.modo === 'copia' ? `<tr><td>Si sacas 100 copias</td><td style="color:var(--verde)">ganas ${dinero(gan * 100)}</td></tr>` : ''}
     </table>
-    <p class="small muted">Redondeé el precio hacia arriba para que sea fácil dar cambio.</p>
-    <button class="btn grande" data-action="calc-crear">💾 Crear producto con este precio</button>`;
+    <h3 style="margin-top:16px">¿Qué hago con este precio?</h3>
+    ${prods.length ? `<label class="campo">Ponérselo a un producto que ya tengo
+      <span class="ayuda">La calculadora no cambia tus productos sola: elige cuál y toca el botón.</span>
+      <select id="calc-prod">${prods.map(p => `<option value="${p.id}">${p.emoji} ${esc(p.nombre)} — ahora a ${dinero(p.precio)}</option>`).join('')}</select></label>
+    <button class="btn grande" data-action="calc-aplicar">✏️ Cambiar su precio a ${dinero(precio)}</button>
+    <p class="centro muted small" style="margin:8px 0">o</p>` : ''}
+    <button class="btn sec grande" data-action="calc-crear">➕ Crear un producto nuevo a ${dinero(precio)}</button>`;
   res.dataset.precio = precio;
   res.dataset.costo = Math.round(costo);
 }
@@ -903,6 +918,26 @@ function crearDesdeCalc() {
       precio, costo: Number(res.dataset.costo), tipo: 'producto', stock: calc.modo === 'vender' ? entero(calc.piezas, 1) : 0,
     }));
   }
+}
+
+// Pone el precio (y el costo) calculado a un producto existente
+function aplicarDesdeCalc() {
+  const res = $('#calc-res');
+  const p = prod($('#calc-prod').value);
+  if (!p) return;
+  const precio = Number(res.dataset.precio);
+  // Si el producto ya descuenta algo del inventario (ej. la hoja), su costo propio es el resto
+  const ins = p.insumoId && prod(p.insumoId);
+  const costo = Math.max(0, Math.round(Number(res.dataset.costo) - (ins ? ins.costo * (p.insumoCant || 1) : 0)));
+  conPin('Cambiar un precio', () => confirmar('✏️ Cambiar precio',
+    `<b>${p.emoji} ${esc(p.nombre)}</b><br>Precio: ${dinero(p.precio)} → <b>${dinero(precio)}</b><br>
+     Costo: ${dinero(costoUnit(p))} → <b>${dinero(costo + (ins ? ins.costo * (p.insumoCant || 1) : 0))}</b>${ins ? ` (incluye ${esc(ins.nombre)})` : ''}`, () => {
+      p.precio = precio;
+      p.costo = costo;
+      guardar();
+      render();
+      toast(`✅ ${esc(p.nombre)} ahora cuesta ${dinero(precio)}`);
+    }, { boton: 'Sí, cambiar', clase: 'verde' }));
 }
 
 /* =========================================================
@@ -1601,6 +1636,8 @@ const ACC = {
   'calc-modo': el => { calc.modo = el.dataset.modo; render(); },
   'calc-pct': el => { calc[el.dataset.k] = Number(el.dataset.n); render(); },
   'calc-crear': crearDesdeCalc,
+  'calc-aplicar': aplicarDesdeCalc,
+  'calc-redondeo': el => { calc.redondeo = el.dataset.r; pintarCalc(); },
   aporte: () => modalAporte(),
   'aporte-inicial': () => modalAporte({ concepto: 'Inversión inicial', monto: infoInversion().mercancia, uso: 'mercancia' }),
   compra: modalCompra,
