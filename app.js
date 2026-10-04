@@ -523,6 +523,11 @@ function vInventario() {
       <div class="cuadro"><div class="et">Tu mercancía te costó</div><div class="val num">${dinero(valorCosto)}</div></div>
       <div class="cuadro verde"><div class="et">Si vendes todo recibes</div><div class="val num">${dinero(valorVenta)}</div></div>
     </div>` : ''}
+    ${paquetePendiente().length && !S.config.ocultarPaquete ? `<div class="tarjeta" style="border:2px dashed var(--rosa)">
+      <h3>🖨️ Lista de precios de impresión</h3>
+      <p class="small muted">${paquetePendiente().length} servicios en tamaño carta y oficio, listos para agregar: texto B/N, documento a color, imágenes y fotos.</p>
+      <div class="fila"><button class="btn crece" data-action="ver-paquete">Ver y agregar</button>
+      <button class="btn gris" data-action="ocultar-paquete">No, gracias</button></div></div>` : ''}
     <div class="chips">${chips.map(([k, t]) => `<button class="chip ${filtroInv === k ? 'activo' : ''}" data-action="filtro-inv" data-tipo="${k}">${t}</button>`).join('')}</div>
     <div class="tarjeta">
       ${lista.length ? `<ul class="lista">${lista.map(p => {
@@ -541,7 +546,53 @@ function vInventario() {
           </div></li>`;
       }).join('')}</ul>` : `<div class="vacio"><span class="grande">📭</span>${prods.length ? 'Nada en esta lista' : 'Aún no hay productos. Toca ➕ Nuevo.'}</div>`}
     </div>
-    <p class="muted small">📥 = llegó mercancía (suma piezas). ✏️ = cambiar nombre, precio o existencias.</p>`;
+    <p class="muted small">📥 = llegó mercancía (suma piezas). ✏️ = cambiar nombre, precio o existencias.</p>
+    ${paquetePendiente().length && S.config.ocultarPaquete ? '<button class="link-btn small" data-action="ver-paquete" style="color:var(--azul)">🖨️ Ver lista de precios de impresión</button>' : ''}`;
+}
+
+// Lista de precios de impresión de Copycat. El costo ya incluye hoja y tinta.
+const PAQUETE_IMPRESION = [
+  ['Texto B/N', '🖨️', 32, 150, 37, 200],
+  ['Documento a color', '🌈', 40, 300, 47, 400],
+  ['Imagen B/N media hoja', '📸', 85, 300, 100, 400],
+  ['Hoja negra o imagen B/N grande', '🧾', 141, 500, 170, 600],
+  ['Foto a color hoja completa', '🎨', 141, 800, 170, 1000],
+].flatMap(([nombre, emoji, cCarta, pCarta, cOficio, pOficio]) => [
+  { nombre: `${nombre} (carta)`, emoji, costo: cCarta, precio: pCarta },
+  { nombre: `${nombre} (oficio)`, emoji, costo: cOficio, precio: pOficio },
+]);
+const paquetePendiente = () => PAQUETE_IMPRESION.filter(x => !S.productos.some(p => sinAcentos(p.nombre) === sinAcentos(x.nombre)));
+
+function modalPaquete() {
+  const pendientes = paquetePendiente();
+  const caja = abrirModal(`${cab('🖨️ Lista de precios de impresión')}
+    <p class="small muted">Quita la palomita de los que no quieras. Después puedes cambiar cualquier precio en ✏️.</p>
+    <form>
+      <ul class="lista">${PAQUETE_IMPRESION.map((x, i) => {
+        const ya = !pendientes.includes(x);
+        return `<li><label style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer">
+          <input type="checkbox" name="p${i}" ${ya ? 'disabled' : 'checked'} style="width:22px;height:22px">
+          <span class="em">${x.emoji}</span>
+          <span class="info"><b>${esc(x.nombre)}</b><span class="small muted">${ya ? 'Ya lo tienes' : `te cuesta ${dinero(x.costo)} · ganas ${dinero(x.precio - x.costo)}`}</span></span>
+          <b class="num">${dinero(x.precio)}</b></label></li>`;
+      }).join('')}</ul>
+      <div class="tip info"><span class="ic">💡</span><div>El costo ya incluye la hoja y la tinta, así que estas impresiones no descuentan hojas del inventario.</div></div>
+      <button class="btn grande" id="btn-paquete">➕ Agregar ${pendientes.length} servicios</button>
+    </form>`, d => {
+    const elegidos = PAQUETE_IMPRESION.filter((x, i) => d['p' + i] && pendientes.includes(x));
+    if (!elegidos.length) { toast('Elige al menos uno'); return false; }
+    setTimeout(() => conPin('Agregar productos', () => {
+      for (const x of elegidos) S.productos.push({ id: uid(), ...x, tipo: 'servicio', stock: 0, minimo: 0, insumoId: null, insumoCant: 1 });
+      guardar();
+      render();
+      toast(`✅ Se agregaron ${elegidos.length} servicios de impresión`);
+    }));
+  });
+  const actualizar = () => {
+    const n = $$('input[type=checkbox]:checked:not(:disabled)', caja).length;
+    $('#btn-paquete', caja).textContent = `➕ Agregar ${n} ${n === 1 ? 'servicio' : 'servicios'}`;
+  };
+  $('form', caja).addEventListener('change', actualizar);
 }
 
 function formProducto(p, pre = {}) {
@@ -1630,6 +1681,8 @@ const ACC = {
   'nuevo-producto': () => conPin('Crear un producto', () => formProducto(null)),
   'editar-producto': el => conPin('Cambiar un producto', () => formProducto(prod(el.dataset.id))),
   resurtir: el => modalResurtir(prod(el.dataset.id)),
+  'ver-paquete': modalPaquete,
+  'ocultar-paquete': () => { S.config.ocultarPaquete = true; guardar(); render(); },
   'nuevo-cliente': () => formCliente(null),
   'ver-cliente': el => verCliente(cliente(el.dataset.id)),
   'editar-cliente': el => formCliente(cliente(el.dataset.id)),
