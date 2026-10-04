@@ -127,7 +127,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 16px; outline: none; }
 .link-btn { background: none; border: 0; padding: 6px; font-size: 1.1rem; }
 
 label.campo { display: block; margin-bottom: 12px; font-weight: 600; font-size: .95rem; }
-label.campo .ayuda { display: block; font-weight: 400; color: var(--suave); font-size: .82rem; margin-top: 2px; }
+.campo .ayuda { display: block; font-weight: 400; color: var(--suave); font-size: .82rem; margin-top: 2px; }
 input[type=text], input[type=number], input[type=tel], input[type=password], input[type=time], input[type=search], input[type=date], select, textarea {
   display: block; width: 100%; margin-top: 6px; min-height: 48px; padding: 10px 12px;
   border: 2px solid var(--borde); border-radius: 12px; background: var(--fondo);

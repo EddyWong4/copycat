@@ -835,7 +835,8 @@ function vCalculadora() {
   return `<h2>🧮 Calculadora de precios</h2>
     <div class="chips">${modos.map(([k, t]) => `<button class="chip ${calc.modo === k ? 'activo' : ''}" data-action="calc-modo" data-modo="${k}">${t}</button>`).join('')}</div>
     <div class="vender" style="padding-bottom:0">
-      <div class="tarjeta" id="calc-form">${campos}</div>
+      <div class="tarjeta" id="calc-form">${campos}
+        <button class="btn gris grande" data-action="calc-limpiar">🧹 Limpiar</button></div>
       <div class="tarjeta" id="calc-res"></div>
     </div>`;
 }
@@ -868,7 +869,7 @@ function pintarCalc() {
     pct = Number(calc.pctCopia) || 0;
     filas = [['📄 Hoja', hoja], ['🖨️ Tóner', tinta], ['💡 Luz y desgaste', otros]];
   }
-  if (!costo) { res.innerHTML = '<div class="vacio"><span class="grande">🤔</span>Llena los datos de la izquierda</div>'; return; }
+  if (!costo) { res.innerHTML = '<div class="vacio"><span class="grande">🤔</span>Llena los datos para ver el precio</div>'; return; }
   const exacto = costo * (1 + pct / 100);
   const precio = redondear(exacto);
   const gan = precio - costo;
@@ -1638,6 +1639,15 @@ const ACC = {
   'calc-crear': crearDesdeCalc,
   'calc-aplicar': aplicarDesdeCalc,
   'calc-redondeo': el => { calc.redondeo = el.dataset.r; pintarCalc(); },
+  // Borra los datos de la calculadora que se está usando (las demás no se tocan)
+  'calc-limpiar': () => {
+    const campos = { vender: { compra: '', piezas: '1', extra: '', pct: 50 },
+      copia: { paquete: '', hojas: '', toner: '', rinde: '', otros: '', pctCopia: 150 },
+      ganancia: { precio: '', costo: '' } }[calc.modo];
+    Object.assign(calc, campos);
+    render();
+    $('#calc-form input')?.focus();
+  },
   aporte: () => modalAporte(),
   'aporte-inicial': () => modalAporte({ concepto: 'Inversión inicial', monto: infoInversion().mercancia, uso: 'mercancia' }),
   compra: modalCompra,
