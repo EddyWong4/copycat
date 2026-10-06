@@ -333,3 +333,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .resultado { background: var(--rosa-claro); }
 .resultado .val { color: var(--rosa); }
 .morado { background: #3b055d !important; }
+
+/* ---------- Velocidad para recuperar la inversión ---------- */
+.velocidades { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 8px 0 12px; }
+.velocidad { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; border-radius: 14px;
+  border: 2px solid var(--borde); background: var(--tarjeta); text-align: center; line-height: 1.2; }
+.velocidad .ic { font-size: 1.6rem; }
+.velocidad.activo { border-color: var(--rosa); background: var(--rosa-claro); }
+.velocidad.activo b { color: var(--rosa); }

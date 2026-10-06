@@ -79,6 +79,7 @@ const nuevoEstado = () => ({
     fondo: 0,            // dinero con el que se abre la caja
     limiteFiado: 20000,  // máximo que puede deber un cliente (0 = sin límite)
     pin: '',             // PIN de adulto (opcional)
+    pctRecuperar: 0,     // % de la ganancia que se aparta para recuperar la inversión (velocidad)
     folio: 0,
     ultimoArchivo: '',   // último día en que se guardó un archivo de respaldo
     bienvenida: false,
@@ -428,7 +429,7 @@ async function registrarVenta(pago, { recibido = 0, cambio = 0, clienteId = null
   });
   const v = {
     id: uid(), folio: S.config.folio, fecha: ahora.toISOString(), dia: diaISO(ahora),
-    items, total: suma(items, i => i.precio * i.cant), pago, recibido, cambio, clienteId,
+    items, total: suma(items, i => i.precio * i.cant), pago, recibido, cambio, clienteId, pctRec: pctRecuperarActual(),
   };
   moverStock(items, -1);
   if (pago === 'fiado') {
@@ -829,7 +830,7 @@ function modalAbono(c) {
     const monto = Math.min(aCent(inAbono.value), d);
     if (!ok || monto <= 0) return;
     const ahora = new Date();
-    c.movs.push({ id: uid(), tipo: 'abono', monto, costo: Math.round(monto * proporcionCosto(c)), fecha: ahora.toISOString(), dia: diaISO(ahora) });
+    c.movs.push({ id: uid(), tipo: 'abono', monto, costo: Math.round(monto * proporcionCosto(c)), pctRec: pctRecuperarActual(), fecha: ahora.toISOString(), dia: diaISO(ahora) });
     await guardar();
     const cambio = Number(caja.dataset.cambio) || 0;
     const resta = deuda(c);
@@ -1009,19 +1010,91 @@ function proporcionCosto(c) {
 const costoAbono = (c, m) => m.costo ?? Math.round(m.monto * proporcionCosto(c));
 
 // Reparto de lo cobrado (ventas en efectivo + pagos de fiado). periodo: "2026-10-03" (día), "2026-10" (mes) o null (siempre).
+// Además del costo, cada cobro aparta para la inversión el % de su ganancia que estaba elegido
+// en ese momento (pctRec). Así, cambiar la velocidad no altera lo que ya se metió en los sobres.
 function repartoDia(periodo) {
-  let total = 0, costo = 0;
+  let total = 0, costo = 0, extra = 0;
+  const sumar = (monto, c, pct) => {
+    total += monto;
+    costo += c;
+    extra += Math.round(Math.max(0, monto - c) * (pct || 0) / 100);
+  };
   for (const v of S.ventas) {
     if (v.cancelada || v.pago !== 'efectivo' || (periodo && !v.dia.startsWith(periodo))) continue;
-    total += v.total;
-    costo += costoVenta(v);
+    sumar(v.total, costoVenta(v), v.pctRec);
   }
   for (const c of S.clientes) for (const m of c.movs) {
     if (m.tipo !== 'abono' || (periodo && !m.dia.startsWith(periodo))) continue;
-    total += m.monto;
-    costo += costoAbono(c, m);
+    sumar(m.monto, costoAbono(c, m), m.pctRec);
   }
-  return { inversion: costo, ganancia: total - costo };
+  return { inversion: costo + extra, ganancia: total - costo - extra, costo, extra, bruta: total - costo };
+}
+
+/* ---------- Velocidad para recuperar la inversión ---------- */
+const VELOCIDADES = [[0, '⏸️', 'Sin apartar'], [20, '🐢', 'Lenta'], [40, '🚶', 'Normal'], [70, '🚀', 'Rápida'], [100, '⚡', 'Toda']];
+// El % se aplica solo mientras falte recuperar algo
+function pctRecuperarActual() {
+  const p = S.config.pctRecuperar || 0;
+  return p && infoInversion().falta > 0 ? p : 0;
+}
+// Ganancia promedio por día con movimientos, en los últimos 14 días
+function gananciaDiaria() {
+  const hoy = hoyISO();
+  const dias = Array.from({ length: 14 }, (_, i) => sumarDias(hoy, -i)).filter(hayMovimientos);
+  if (!dias.length) return 0;
+  return suma(dias, d => repartoDia(d).bruta) / dias.length;
+}
+function diasPara(falta, pct, porDia = gananciaDiaria()) {
+  if (!falta) return 0;
+  if (!pct || porDia <= 0) return Infinity;
+  return Math.ceil(falta / (porDia * pct / 100));
+}
+const textoDias = d => d === Infinity ? 'nunca' : d <= 1 ? '1 día' : d < 14 ? `${d} días` : d < 60 ? `${Math.round(d / 7)} semanas` : `${Math.round(d / 30)} meses`;
+
+function htmlVelocidad(inv) {
+  const pct = S.config.pctRecuperar || 0;
+  const porDia = gananciaDiaria();
+  const elegida = VELOCIDADES.find(([n]) => n === pct);
+  return `<h3 style="margin-top:16px">⚡ ¿Qué tan rápido quieres recuperarla?</h3>
+    <p class="small muted">Elige qué parte de la <b>ganancia</b> se aparta al sobre de inversión, además de lo que cuesta cada cosa.</p>
+    <div class="velocidades">${VELOCIDADES.map(([n, ic, t]) => `<button class="velocidad ${n === pct ? 'activo' : ''}" data-action="velocidad" data-n="${n}">
+      <span class="ic">${ic}</span><b>${t}</b><span class="small">${n}% de la ganancia</span>
+      ${inv.falta && porDia > 0 ? `<span class="small muted">${n ? '≈ ' + textoDias(diasPara(inv.falta, n, porDia)) : '—'}</span>` : ''}</button>`).join('')}
+      <button class="velocidad ${pct && !elegida ? 'activo' : ''}" data-action="velocidad-otra"><span class="ic">✏️</span><b>Otro</b><span class="small">${pct && !elegida ? pct + '%' : 'tú eliges'}</span></button>
+    </div>
+    ${!inv.falta ? '<div class="tip ok"><span class="ic">🎉</span><div>Ya no falta nada por recuperar: <b>toda la ganancia se queda como ganancia</b>, aunque haya una velocidad elegida.</div></div>'
+      : porDia <= 0 ? '<div class="tip info"><span class="ic">📅</span><div>Cuando haya ventas te digo en cuántos días recuperas la inversión con cada velocidad.</div></div>'
+      : pct ? `<div class="tip info"><span class="ic">📅</span><div>Ganas unos <b>${dinero(porDia)}</b> al día. Apartando el ${pct}% (${dinero(porDia * pct / 100)} al día), recuperas los ${dinero(inv.falta)} que faltan en <b>${textoDias(diasPara(inv.falta, pct, porDia))}</b>.</div></div>`
+      : `<div class="tip warn"><span class="ic">⏸️</span><div>Sin apartar ganancia, la inversión solo se recupera con lo que cuesta cada cosa y lo que regreses a mano. Elige una velocidad para recuperarla más rápido.</div></div>`}
+    ${pct ? `<p class="small muted">Ejemplo: si ganas $10 en una venta, <b>${dinero(pct * 10)}</b> van a 🟪 inversión y <b>${dinero((100 - pct) * 10)}</b> se quedan en 💗 ganancia.</p>` : ''}`;
+}
+
+function cambiarVelocidad(n) {
+  n = Math.min(100, Math.max(0, Math.round(n)));
+  conPin('Cambiar la velocidad para recuperar la inversión', () => {
+    S.config.pctRecuperar = n;
+    guardar();
+    render();
+    toast(n ? `⚡ Se apartará el ${n}% de la ganancia para la inversión` : 'Ya no se aparta ganancia para la inversión');
+  });
+}
+function modalVelocidadOtra() {
+  abrirModal(`${cab('✏️ Otra velocidad')}
+    <form>
+      <label class="campo">¿Qué porcentaje de la ganancia se va a la inversión?<span class="ayuda">De 0 a 100. Ej. 50 = la mitad de la ganancia.</span>
+        <input type="number" inputmode="numeric" name="pct" min="0" max="100" required value="${S.config.pctRecuperar || ''}" autofocus></label>
+      <div id="calc-vel"></div>
+      <button class="btn grande">💾 Usar este porcentaje</button>
+    </form>`, d => { setTimeout(() => cambiarVelocidad(Number(d.pct))); });
+  const f = $('#modal form');
+  const inv = infoInversion();
+  const pintar = () => {
+    const n = Math.min(100, Math.max(0, Number(f.pct.value) || 0));
+    $('#calc-vel').innerHTML = n && inv.falta && gananciaDiaria() > 0
+      ? `<div class="tip info"><span class="ic">📅</span><div>Con el ${n}% recuperas lo que falta en <b>${textoDias(diasPara(inv.falta, n))}</b>.</div></div>` : '';
+  };
+  f.addEventListener('input', pintar);
+  pintar();
 }
 
 function sobres() {
@@ -1118,7 +1191,8 @@ function vDinero() {
           ${inv.equipo ? `<tr><td>🖨️ En equipo (impresora, engargoladora…)</td><td>${dinero(inv.equipo)}</td></tr>` : ''}
           ${inv.devuelto ? `<tr><td>↩️ Ya se regresó</td><td>${dinero(inv.devuelto)}</td></tr>` : ''}
         </table>
-        ${inv.equipo ? '<p class="small muted">El equipo no se recupera con lo que cuesta cada copia: se paga con la ganancia. Cuando quieras, usa <b>💸 Saqué dinero → Regresar inversión</b> desde el sobre de ganancia.</p>' : ''}`
+        ${inv.equipo ? '<p class="small muted">El equipo no se recupera con lo que cuesta cada copia: se paga con la ganancia. Para eso sirve la velocidad de abajo.</p>' : ''}
+        ${htmlVelocidad(inv)}`
       : `<div class="tip info"><span class="ic">💡</span><div>Anota cuánto dinero se puso para empezar el negocio (mercancía, hojas, impresora…). Así sabrás cuánto falta para recuperarlo.</div></div>
         <button class="btn grande" data-action="aporte-inicial">💼 Anotar inversión inicial</button>`}
     </div>
@@ -1128,6 +1202,7 @@ function vDinero() {
       <p class="small">Si vendes un folder en <b>$5</b> que te costó <b>$2.50</b>:</p>
       <div class="sobre-fila sobre-inv"><span>🟪 $2.50 regresan a tu inversión</span><b>$2.50</b></div>
       <div class="sobre-fila sobre-gan"><span>💗 $2.50 son tu ganancia</span><b>$2.50</b></div>
+      ${S.config.pctRecuperar ? `<p class="small">Con la velocidad de ${S.config.pctRecuperar}%, de esos $2.50 de ganancia también se apartan <b>${dinero(250 * S.config.pctRecuperar / 100)}</b> para la inversión mientras falte por recuperar.</p>` : ''}
       <p class="small muted">Al <b>cerrar el día</b> la app te dice cuánto meter en cada sobre. Para volver a surtir usa el sobre de inversión, así nunca te comes tu negocio. 😉</p>
     </div>
 
@@ -1282,7 +1357,7 @@ function vHoy() {
     <div class="cuadros">
       <div class="cuadro azul"><div class="et">🧾 Vendiste</div><div class="val num">${dinero(r.total)}</div><div class="small muted">${r.ventas} ${r.ventas === 1 ? 'venta' : 'ventas'}</div></div>
       <div class="cuadro verde"><div class="et">🤑 Ganancia de lo vendido</div><div class="val num">${dinero(r.ganancia)}</div></div>
-      <div class="cuadro sobre-inv"><div class="et">🟪 Para recuperar inversión</div><div class="val num">${dinero(rep.inversion)}</div><div class="small muted">lo que costó lo cobrado</div></div>
+      <div class="cuadro sobre-inv"><div class="et">🟪 Para recuperar inversión</div><div class="val num">${dinero(rep.inversion)}</div><div class="small muted">${rep.extra ? `costo ${dinero(rep.costo)} + ${dinero(rep.extra)} de la ganancia` : 'lo que costó lo cobrado'}</div></div>
       <div class="cuadro sobre-gan"><div class="et">💗 Ganancia cobrada</div><div class="val num">${dinero(rep.ganancia)}</div><div class="small muted">ya en efectivo</div></div>
       <div class="cuadro"><div class="et">💵 Cobrado en efectivo</div><div class="val num">${dinero(r.efectivo)}</div></div>
       <div class="cuadro naranja"><div class="et">📒 Fiado</div><div class="val num">${dinero(r.fiado)}</div></div>
@@ -1394,7 +1469,7 @@ function modalCierre(dia = hoyISO()) {
     $('#reparto', caja).innerHTML = aInv || aGan || dif ? `<div class="reparto">
       <h3>📮 Ahora reparte el dinero de la caja</h3>
       ${antes ? '<p class="small muted">Ya habías cerrado este día: aquí solo sale lo nuevo.</p>' : ''}
-      <div class="sobre-fila sobre-inv"><span>🟪 Al sobre de <b>INVERSIÓN</b><br><span class="small muted">lo que costó lo que vendiste</span></span><b class="num">${dinero(aInv)}</b></div>
+      <div class="sobre-fila sobre-inv"><span>🟪 Al sobre de <b>INVERSIÓN</b><br><span class="small muted">${rep.extra ? `lo que costó + ${dinero(rep.extra)} de la ganancia para recuperar` : 'lo que costó lo que vendiste'}</span></span><b class="num">${dinero(aInv)}</b></div>
       <div class="sobre-fila sobre-gan"><span>💗 Al sobre de <b>GANANCIA</b><br><span class="small muted">${dif ? `tu ganancia ${dif > 0 ? '+ lo que sobró' : '− lo que faltó'}` : 'lo que ganaste'}</span></span><b class="num">${dinero(gan)}</b></div>
       <div class="sobre-fila"><span>🗃️ Se queda en la caja<br><span class="small muted">el fondo para dar cambio mañana</span></span><b class="num">${dinero(fondo)}</b></div>
       ${gan < 0 ? '<p class="small" style="color:var(--rojo)">Faltó más dinero de lo que ganaste hoy: lo que falta sale del sobre de ganancia.</p>' : ''}
@@ -1682,6 +1757,8 @@ const ACC = {
   'editar-producto': el => conPin('Cambiar un producto', () => formProducto(prod(el.dataset.id))),
   resurtir: el => modalResurtir(prod(el.dataset.id)),
   'ver-paquete': modalPaquete,
+  velocidad: el => cambiarVelocidad(Number(el.dataset.n)),
+  'velocidad-otra': modalVelocidadOtra,
   'ocultar-paquete': () => { S.config.ocultarPaquete = true; guardar(); render(); },
   'nuevo-cliente': () => formCliente(null),
   'ver-cliente': el => verCliente(cliente(el.dataset.id)),
